@@ -615,4 +615,12 @@ def card_end() -> str:
     return "</div>"
 
 
-def render_output(problem: str, dataset_answer: str, row: pd.Series, bundle: Optional[dict], story_img_html: str, exact_html: str, operation_html: str,
+def render_output(
+    problem: str,
+    dataset_answer: str,
+    row: pd.Series,
+    bundle: Optional[dict],
+    story_img_html: str,
+    exact_html: str,
+    operation_html: str,
+):
