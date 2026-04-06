@@ -460,8 +460,10 @@ shuffle_btn = st.sidebar.button("🎲 Surprise me")
 st.sidebar.info("Adapter only is fastest. Illustration mode adds the image and emoji visuals.")
 
 client_ok = get_client() is not None
-st.sidebar.success("OpenAI key detected") if client_ok else st.sidebar.warning("No OpenAI key detected")
-
+if client_ok:
+    st.sidebar.success("OpenAI key detected")
+else:
+    st.sidebar.warning("No OpenAI key detected")
 default_xml_path = APP_DIR / "ASDiv.xml"
 xml_bytes = None
 if uploaded_xml is not None:
