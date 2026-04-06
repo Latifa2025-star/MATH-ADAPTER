@@ -1,12 +1,14 @@
 
 import os
 import re
+import io
 import json
 import base64
 import hashlib
 import random
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -17,25 +19,71 @@ except Exception:
     OpenAI = None
 
 st.set_page_config(
-    page_title="Math Problem Adapter",
+    page_title="Math Adapter Studio",
     page_icon="🌈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.markdown("""
+# =========================
+# Styling
+# =========================
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap');
-html, body, [class*="css"]  { font-family: 'Fredoka', sans-serif; }
-.main .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1400px; }
-.hero { background: radial-gradient(circle at top left, #fff7d6 0%, #e6f7ff 40%, #f5e6ff 75%, #e9fff1 100%);
-    border: 3px solid rgba(255,255,255,0.95); border-radius: 28px; padding: 1.5rem 1.7rem;
-    box-shadow: 0 14px 30px rgba(0,0,0,0.10); margin-bottom: 1rem; }
-.hero h1 { margin: 0 0 0.35rem 0; font-size: 2.4rem; }
-.hero p { margin: 0; font-size: 1.05rem; color: #3a3a3a; }
-.card { background: rgba(255,255,255,0.98); border-radius: 22px; padding: 1rem 1.1rem;
-    box-shadow: 0 10px 18px rgba(0,0,0,0.07); border: 2px solid rgba(0,0,0,0.04); margin-bottom: 1rem; }
-.badge { display: inline-block; padding: 0.34rem 0.75rem; border-radius: 999px; font-size: 0.84rem; font-weight: 700; margin-bottom: 0.7rem; }
+
+html, body, [class*="css"] { font-family: 'Fredoka', sans-serif; }
+.main .block-container { max-width: 1450px; padding-top: 1rem; padding-bottom: 2rem; }
+
+:root {
+  --bg1: #fff7d6;
+  --bg2: #e6f7ff;
+  --bg3: #f5e6ff;
+  --bg4: #e9fff1;
+  --card: rgba(255,255,255,0.96);
+  --border: rgba(0,0,0,0.06);
+  --shadow: 0 16px 40px rgba(0,0,0,0.08);
+}
+
+.hero {
+  background: radial-gradient(circle at top left, var(--bg1) 0%, var(--bg2) 35%, var(--bg3) 68%, var(--bg4) 100%);
+  border: 3px solid rgba(255,255,255,0.95);
+  border-radius: 30px;
+  padding: 1.4rem 1.6rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.hero h1 { margin: 0 0 0.4rem 0; font-size: 2.4rem; }
+.hero p { margin: 0; color: #3c3c3c; font-size: 1.02rem; }
+
+.kpi {
+  background: rgba(255,255,255,0.82);
+  border-radius: 20px;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255,255,255,0.7);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.05);
+  text-align: center;
+}
+.kpi .num { font-size: 1.45rem; font-weight: 700; }
+.kpi .lab { font-size: 0.9rem; color: #5a5a5a; }
+
+.card {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+  margin-bottom: 1rem;
+}
+.badge {
+  display: inline-block;
+  padding: 0.32rem 0.72rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 0.7rem;
+}
 .badge-orig { background:#e8f3ff; color:#0b3d91; }
 .badge-img  { background:#fff0e6; color:#8a3b00; }
 .badge-exact{ background:#e9fff1; color:#126a2e; }
@@ -44,49 +92,97 @@ html, body, [class*="css"]  { font-family: 'Fredoka', sans-serif; }
 .badge-ell  { background:#e9fff1; color:#126a2e; }
 .badge-id   { background:#f3e8ff; color:#5b21b6; }
 .badge-sol  { background:#ffe6f2; color:#9b005d; }
-.bigtext { font-size: 1.35rem; line-height: 1.55; }
-.smalltext { font-size: 0.98rem; color: #404040; }
-.eqline { font-size: 2.1rem; font-weight: 700; margin: 0.35rem 0; }
-.emojiwrap { font-size: 2.2rem; line-height: 1.35; word-wrap: break-word; }
-.stButton>button { border-radius: 14px; font-weight: 700; }
+.badge-meta { background:#eef2ff; color:#3730a3; }
+
+.bigtext { font-size: 1.23rem; line-height: 1.6; white-space: pre-wrap; }
+.smalltext { font-size: 0.96rem; color: #474747; white-space: pre-wrap; }
+.eqline { font-size: 2rem; font-weight: 700; margin: 0.2rem 0; }
+.emojiwrap { font-size: 2rem; line-height: 1.35; word-wrap: break-word; white-space: pre-wrap; }
+.muted { color: #666; }
+
+.stButton > button,
+.stDownloadButton > button {
+  border-radius: 16px !important;
+  font-weight: 700 !important;
+}
+
+.search-hint {
+  font-size: 0.9rem;
+  color: #5d5d5d;
+  margin-top: -0.3rem;
+  margin-bottom: 0.5rem;
+}
 </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 APP_DIR = Path(__file__).resolve().parent
 CACHE_DIR = APP_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-def md5(s: str) -> str:
-    return hashlib.md5(s.encode("utf-8")).hexdigest()
+TEXT_MODEL = "gpt-4.1-mini"
+IMAGE_MODEL = "gpt-image-1"
 
-def read_text(path: Path):
+# =========================
+# Helpers
+# =========================
+def md5(text: str) -> str:
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def read_text(path: Path) -> Optional[str]:
     return path.read_text(encoding="utf-8") if path.exists() else None
 
-def write_text(path: Path, text: str):
+
+def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def clean_spaces(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip())
+
 
 def extract_json_object(text: str) -> dict:
     text = (text or "").strip()
     try:
         return json.loads(text)
     except Exception:
-        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not m:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
             raise ValueError("No JSON found in model output.")
-        cand = re.sub(r",\s*([}\]])", r"\1", m.group(0).strip())
-        return json.loads(cand)
+        candidate = re.sub(r",\s*([}\]])", r"\1", match.group(0).strip())
+        return json.loads(candidate)
 
-def clean_spaces(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").strip())
 
-def dataset_answer_num(answer: str):
-    m = re.search(r"(\d+)", str(answer))
-    return int(m.group(1)) if m else None
+def dataset_answer_num(answer: str) -> Optional[int]:
+    match = re.search(r"(\d+)", str(answer))
+    return int(match.group(1)) if match else None
 
+
+def answer_object(answer: str) -> str:
+    match = re.search(r"\(([^)]+)\)", str(answer))
+    if not match:
+        return ""
+    return normalize_obj(match.group(1))
+
+
+def image_html_from_b64(b64: str) -> str:
+    return f"<img src='data:image/png;base64,{b64}' style='width:100%;border-radius:18px;'/>"
+
+
+def compact_problem_label(row: pd.Series, idx: int) -> str:
+    text = re.sub(r"\s+", " ", str(row["problem_text_full"])).strip()
+    preview = text[:120] + ("…" if len(text) > 120 else "")
+    return f"#{idx} • {preview}"
+
+
+# =========================
+# Data loaders
+# =========================
 @st.cache_data(show_spinner=False)
 def parse_asdiv_full(xml_bytes: bytes) -> pd.DataFrame:
-    import io
     tree = ET.parse(io.BytesIO(xml_bytes))
     root = tree.getroot()
     rows = []
@@ -97,6 +193,9 @@ def parse_asdiv_full(xml_bytes: bytes) -> pd.DataFrame:
         question = None
         answer = None
         solution = None
+        grade = None
+        category = None
+        problem_id = None
         for child in item.iter():
             tag = child.tag.lower()
             txt = clean_spaces(child.text)
@@ -104,24 +203,92 @@ def parse_asdiv_full(xml_bytes: bytes) -> pd.DataFrame:
                 continue
             if tag in ["body", "stem", "text"]:
                 body = txt if (body is None or len(txt) > len(body)) else body
-            if tag in ["question", "ques"]:
+            elif tag in ["question", "ques"]:
                 question = txt if (question is None or len(txt) > len(question)) else question
-            if tag in ["answer", "ans", "final"]:
+            elif tag in ["answer", "ans", "final"]:
                 answer = txt if (answer is None or len(txt) > len(answer)) else answer
-            if tag in ["solution", "rationale", "explanation"]:
+            elif tag in ["solution", "rationale", "explanation"]:
                 solution = txt if (solution is None or len(txt) > len(solution)) else solution
+            elif tag in ["grade", "schoolgrade"]:
+                grade = txt
+            elif tag in ["type", "category"]:
+                category = txt
+            elif tag in ["id", "problemid"]:
+                problem_id = txt
         full = f"{body} {question}" if body and question else (body or question)
         ref = answer or solution
         if full and ref:
-            rows.append({
-                "split": "asdiv",
-                "problem_text_full": full,
-                "body_text": body,
-                "question_text": question,
-                "reference_answer": ref,
-            })
+            rows.append(
+                {
+                    "dataset_name": "ASDiv",
+                    "problem_id": problem_id or f"ASDiv-{len(rows)+1}",
+                    "grade": grade or "",
+                    "category": category or "",
+                    "problem_text_full": full,
+                    "body_text": body or "",
+                    "question_text": question or "",
+                    "reference_answer": ref,
+                }
+            )
     return pd.DataFrame(rows).drop_duplicates().reset_index(drop=True)
 
+
+@st.cache_data(show_spinner=False)
+def parse_json_dataset(file_bytes: bytes, dataset_name: str, filename: str) -> pd.DataFrame:
+    text = file_bytes.decode("utf-8", errors="ignore")
+    data = json.loads(text)
+    if isinstance(data, dict):
+        for key in ["data", "items", "problems", "examples", "records"]:
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+    if not isinstance(data, list):
+        raise ValueError(f"{filename}: expected a JSON list or a dict containing a list.")
+
+    problem_keys = ["problem_text_full", "problem", "question", "text", "body", "input", "prompt"]
+    answer_keys = ["reference_answer", "answer", "final_answer", "output", "label", "target"]
+    grade_keys = ["grade", "level"]
+    category_keys = ["category", "type", "operation"]
+    id_keys = ["id", "problem_id", "uid"]
+
+    rows = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
+        problem = next((clean_spaces(item.get(k)) for k in problem_keys if clean_spaces(item.get(k))), "")
+        answer = next((clean_spaces(item.get(k)) for k in answer_keys if clean_spaces(item.get(k))), "")
+        grade = next((clean_spaces(item.get(k)) for k in grade_keys if clean_spaces(item.get(k))), "")
+        category = next((clean_spaces(item.get(k)) for k in category_keys if clean_spaces(item.get(k))), "")
+        pid = next((clean_spaces(item.get(k)) for k in id_keys if clean_spaces(item.get(k))), f"{dataset_name}-{i+1}")
+        if problem and answer:
+            rows.append(
+                {
+                    "dataset_name": dataset_name,
+                    "problem_id": pid,
+                    "grade": grade,
+                    "category": category,
+                    "problem_text_full": problem,
+                    "body_text": item.get("body", "") or "",
+                    "question_text": item.get("question", "") or "",
+                    "reference_answer": answer,
+                }
+            )
+    if not rows:
+        raise ValueError(f"{filename}: no usable problem/answer pairs found.")
+    return pd.DataFrame(rows).drop_duplicates().reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_default_datasets(xml_bytes: Optional[bytes]) -> Dict[str, pd.DataFrame]:
+    datasets: Dict[str, pd.DataFrame] = {}
+    if xml_bytes:
+        datasets["ASDiv"] = parse_asdiv_full(xml_bytes)
+    return datasets
+
+
+# =========================
+# OpenAI client
+# =========================
 @st.cache_resource(show_spinner=False)
 def get_client():
     api_key = None
@@ -134,30 +301,33 @@ def get_client():
         return None
     return OpenAI(api_key=api_key)
 
-TEXT_MODEL = "gpt-4.1-mini"
-IMAGE_MODEL = "gpt-image-1"
 
 def call_text(prompt: str) -> str:
     client = get_client()
     if client is None:
         raise RuntimeError("OpenAI API key not found. Add OPENAI_API_KEY to Streamlit secrets or environment.")
-    resp = client.responses.create(model=TEXT_MODEL, input=prompt)
-    return resp.output_text
+    response = client.responses.create(model=TEXT_MODEL, input=prompt)
+    return response.output_text
 
-def images_generate_b64(prompt: str, size="1024x1024") -> str:
+
+def images_generate_b64(prompt: str, size: str = "1024x1024") -> str:
     client = get_client()
     if client is None:
         raise RuntimeError("OpenAI API key not found. Add OPENAI_API_KEY to Streamlit secrets or environment.")
     key = md5(prompt + size)
-    p = CACHE_DIR / f"{key}_storyimg.b64.txt"
-    if p.exists():
-        return p.read_text(encoding="utf-8")
+    cached = CACHE_DIR / f"{key}_storyimg.b64.txt"
+    if cached.exists():
+        return cached.read_text(encoding="utf-8")
     img = client.images.generate(model=IMAGE_MODEL, prompt=prompt, size=size)
     b64 = img.data[0].b64_json
     _ = base64.b64decode(b64)
-    p.write_text(b64, encoding="utf-8")
+    cached.write_text(b64, encoding="utf-8")
     return b64
 
+
+# =========================
+# Prompts
+# =========================
 def prompt_all_text(problem: str, dataset_answer: str) -> str:
     return f'''
 Return ONLY valid JSON.
@@ -170,6 +340,7 @@ Rules:
 - Keep the math meaning exactly the same.
 - Do not add new information.
 - The final answer must stay: {dataset_answer}
+- Keep each learner version classroom-friendly and natural.
 
 Return this exact JSON schema:
 {{
@@ -189,6 +360,7 @@ Dataset answer:
 {dataset_answer}
 '''.strip()
 
+
 def prompt_story_image(problem: str) -> str:
     return f'''
 Create a beautiful, colorful children's workbook illustration for this Grade 1–2 word problem.
@@ -201,6 +373,10 @@ Problem:
 {problem}
 '''.strip()
 
+
+# =========================
+# Emoji logic
+# =========================
 def normalize_obj(word: str) -> str:
     w = (word or "").lower().strip()
     w = re.sub(r"[^a-z\s\-]", "", w)
@@ -213,6 +389,7 @@ def normalize_obj(word: str) -> str:
     elif w.endswith("s") and len(w) > 2 and not w.endswith("ss"):
         w = w[:-1]
     return w
+
 
 ALIASES = {
     "apples":"apple", "oranges":"orange", "pears":"pear", "bananas":"banana", "grapes":"grape",
@@ -232,68 +409,39 @@ ALIASES = {
 
 EMOJI_MAP = {
     "apple": {"red":"🍎", "green":"🍏", "":"🍎"},
-    "orange": {"":"🍊"},
-    "pear": {"":"🍐"},
-    "banana": {"":"🍌"},
-    "grape": {"":"🍇"},
-    "peach": {"":"🍑"},
-    "cherry": {"":"🍒"},
-    "lemon": {"":"🍋"},
-    "strawberry": {"":"🍓"},
-    "watermelon": {"":"🍉"},
-    "pineapple": {"":"🍍"},
-    "cookie": {"":"🍪"},
-    "cake": {"":"🍰"},
-    "cupcake": {"":"🧁"},
-    "donut": {"":"🍩"},
-    "candy": {"":"🍬"},
-    "sandwich": {"":"🥪"},
-    "egg": {"":"🥚"},
-    "pencil": {"":"✏️"},
-    "pen": {"":"🖊️"},
-    "book": {"":"📚"},
-    "notebook": {"":"📓"},
-    "crayon": {"":"🖍️"},
-    "eraser": {"":"🧽"},
-    "ruler": {"":"📏"},
-    "ticket": {"":"🎟️"},
-    "sticker": {"":"⭐"},
-    "balloon": {"":"🎈"},
-    "flower": {"":"🌸"},
-    "toy": {"":"🧸"},
-    "doll": {"":"🪆"},
-    "block": {"":"🧱"},
-    "ball": {"":"⚽"},
-    "marble": {"":"🔵"},
-    "button": {"":"🔘"},
-    "box": {"":"📦"},
-    "basket": {"":"🧺"},
-    "bag": {"":"👜"},
-    "cup": {"":"🥤"},
-    "bottle": {"":"🍼"},
-    "sock": {"":"🧦"},
-    "shirt": {"":"👕"},
-    "shoe": {"":"👟"},
-    "hat": {"":"🧢"},
-    "coin": {"":"🪙"},
-    "money": {"":"💵"},
-    "dog": {"":"🐶"},
-    "cat": {"":"🐱"},
-    "bird": {"":"🐦"},
-    "turtle": {"":"🐢"},
-    "fish": {"":"🐟"},
-    "duck": {"":"🦆"},
-    "rabbit": {"":"🐰"},
-    "cow": {"":"🐄"},
-    "pig": {"":"🐷"},
-    "horse": {"":"🐴"},
-    "toucan": {"":"🦜"},
-    "car": {"":"🚗"},
-    "bus": {"":"🚌"},
-    "bike": {"":"🚲"},
-    "train": {"":"🚆"},
+    "orange": {"":"🍊"}, "pear": {"":"🍐"}, "banana": {"":"🍌"}, "grape": {"":"🍇"},
+    "peach": {"":"🍑"}, "cherry": {"":"🍒"}, "lemon": {"":"🍋"}, "strawberry": {"":"🍓"},
+    "watermelon": {"":"🍉"}, "pineapple": {"":"🍍"}, "cookie": {"":"🍪"}, "cake": {"":"🍰"},
+    "cupcake": {"":"🧁"}, "donut": {"":"🍩"}, "candy": {"":"🍬"}, "sandwich": {"":"🥪"},
+    "egg": {"":"🥚"}, "pencil": {"":"✏️"}, "pen": {"":"🖊️"}, "book": {"":"📚"},
+    "notebook": {"":"📓"}, "crayon": {"":"🖍️"}, "eraser": {"":"🧽"}, "ruler": {"":"📏"},
+    "ticket": {"":"🎟️"}, "sticker": {"":"⭐"}, "balloon": {"":"🎈"}, "flower": {"":"🌸"},
+    "toy": {"":"🧸"}, "doll": {"":"🪆"}, "block": {"":"🧱"}, "ball": {"":"⚽"},
+    "marble": {"":"🔵"}, "button": {"":"🔘"}, "box": {"":"📦"}, "basket": {"":"🧺"},
+    "bag": {"":"👜"}, "cup": {"":"🥤"}, "bottle": {"":"🍼"}, "sock": {"":"🧦"},
+    "shirt": {"":"👕"}, "shoe": {"":"👟"}, "hat": {"":"🧢"}, "coin": {"":"🪙"},
+    "money": {"":"💵"}, "dog": {"":"🐶"}, "cat": {"":"🐱"}, "bird": {"":"🐦"},
+    "turtle": {"":"🐢"}, "fish": {"":"🐟"}, "duck": {"":"🦆"}, "rabbit": {"":"🐰"},
+    "cow": {"":"🐄"}, "pig": {"":"🐷"}, "horse": {"":"🐴"}, "toucan": {"":"🦜"},
+    "car": {"":"🚗"}, "bus": {"":"🚌"}, "bike": {"":"🚲"}, "train": {"":"🚆"},
     "truck": {"":"🚚"},
 }
+
+NUM_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "thirty": 30, "forty": 40, "fifty": 50,
+}
+
+
+def word_to_num(s: str) -> Optional[int]:
+    s = str(s).lower().strip()
+    if s.isdigit():
+        return int(s)
+    return NUM_WORDS.get(s)
+
 
 def choose_emoji(obj: str, color: str = "") -> str:
     obj = normalize_obj(obj)
@@ -303,8 +451,9 @@ def choose_emoji(obj: str, color: str = "") -> str:
         return EMOJI_MAP[obj].get(color, EMOJI_MAP[obj].get("", "🟦"))
     return "🟦"
 
-def emoji_grid(emoji: str, n: int, cols: int = 10):
-    parts = []
+
+def emoji_grid(emoji: str, n: int, cols: int = 10) -> str:
+    parts: List[str] = []
     for i in range(int(n)):
         if i % cols == 0:
             parts.append("\n")
@@ -312,21 +461,8 @@ def emoji_grid(emoji: str, n: int, cols: int = 10):
         parts.append(" ")
     return "".join(parts).strip()
 
-NUM_WORDS = {
-    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
-    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
-    "thirty": 30, "forty": 40, "fifty": 50
-}
 
-def word_to_num(s):
-    s = str(s).lower().strip()
-    if s.isdigit():
-        return int(s)
-    return NUM_WORDS.get(s)
-
-def extract_local_count_plan(problem: str):
+def extract_local_count_plan(problem: str) -> dict:
     text = problem.lower()
     items = []
     pattern = re.compile(
@@ -334,252 +470,149 @@ def extract_local_count_plan(problem: str):
         r"(?:(red|green|blue|yellow|orange|purple|pink|black|white|brown)\s+)?"
         r"([a-zA-Z]+)\b"
     )
-    for m in pattern.finditer(text):
-        count = word_to_num(m.group(1))
-        color = m.group(2) or ""
-        obj = normalize_obj(m.group(3))
+    ignore = {
+        "minute", "hour", "day", "week", "month", "year", "mile", "meter", "foot", "inch",
+        "page", "more", "less", "left", "each", "every", "total", "amount", "group"
+    }
+    for match in pattern.finditer(text):
+        count = word_to_num(match.group(1))
+        color = match.group(2) or ""
+        obj = normalize_obj(match.group(3))
         obj = ALIASES.get(obj, obj)
-        if obj in {"minute","hour","day","week","month","year","mile","meter","foot","inch","page","more","less","left","each","every","total","amount","group"}:
+        if obj in ignore:
             continue
         if count is not None:
             items.append({"object": obj, "count": count, "color": color})
     return {"items": items}
+
 
 def build_exact_visual(plan: dict) -> str:
     items = plan.get("items", [])
     if not items:
         return "<div class='smalltext'>No countable objects were detected automatically.</div>"
     html = []
-    for it in items:
-        obj = it.get("object","")
-        color = it.get("color","")
-        count = int(it.get("count", 0))
-        emo = choose_emoji(obj, color)
+    for item in items:
+        obj = item.get("object", "")
+        color = item.get("color", "")
+        count = int(item.get("count", 0))
+        emoji = choose_emoji(obj, color)
         label = f"{count} {color} {obj}(s)".replace("  ", " ").strip()
         html.append(f"<div class='smalltext'><b>✅ {label}</b></div>")
-        html.append(f"<div class='emojiwrap'>{emoji_grid(emo, count, cols=10)}</div>")
+        html.append(f"<div class='emojiwrap'>{emoji_grid(emoji, count, cols=10)}</div>")
     return "\n".join(html)
 
-def get_answer_object(dataset_answer: str):
-    m = re.search(r"\(([^)]+)\)", str(dataset_answer))
-    if not m:
-        return ""
-    obj = normalize_obj(m.group(1))
-    obj = ALIASES.get(obj, obj)
-    return obj
 
 def build_operation_visual(problem: str, dataset_answer: str, plan: dict) -> str:
     text = problem.lower()
     items = plan.get("items", [])
     final_num = dataset_answer_num(dataset_answer)
-    answer_obj = get_answer_object(dataset_answer)
+    obj = answer_object(dataset_answer) or (items[0]["object"] if items else "item")
+    color = items[0].get("color", "") if items else ""
 
     if final_num is None:
-        return "<div class='smalltext'>Could not detect the final number automatically.</div>"
+        return "<div class='smalltext'>Could not detect the final answer automatically.</div>"
 
-    def block(obj, color, n, label):
+    def block(label: str, n: int) -> str:
         emo = choose_emoji(obj, color)
         return f"<div class='smalltext'><b>{label}</b></div><div class='emojiwrap'>{emoji_grid(emo, n, cols=10)}</div>"
 
-    if len(items) >= 2 and any(w in text for w in ["together", "altogether", "in all", "total", "sum", "basket", "together have"]):
-        a, b = items[0], items[1]
-        out_obj = answer_obj or a["object"]
-        return f'''
-        {block(a["object"], a.get("color",""), a["count"], f'{a["count"]} {a.get("color","")} {a["object"]}(s)')}
-        <div class="eqline">+</div>
-        {block(b["object"], b.get("color",""), b["count"], f'{b["count"]} {b.get("color","")} {b["object"]}(s)')}
-        <div class="eqline">=</div>
-        {block(out_obj, "", final_num, f'{final_num} {out_obj}(s)')}
-        '''
+    nums = [word_to_num(x) for x in re.findall(r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\b", text)]
+    nums = [x for x in nums if x is not None]
 
-    if any(w in text for w in ["fewer", "less", "left", "remain", "after", "gave away", "lost", "spent", "used", "minus"]):
-        nums = [word_to_num(x) for x in re.findall(r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\b", text)]
-        nums = [x for x in nums if x is not None]
-        if len(nums) >= 2:
-            a, b = max(nums[0], nums[1]), min(nums[0], nums[1])
-            obj = answer_obj or (items[0]["object"] if items else "item")
-            color = items[0].get("color","") if items else ""
-            return f'''
-            {block(obj, color, a, f'{a} {obj}(s)')}
-            <div class="eqline">−</div>
-            {block(obj, color, b, f'{b} {obj}(s)')}
-            <div class="eqline">=</div>
-            {block(obj, color, final_num, f'{final_num} {obj}(s)')}
-            '''
+    if len(items) >= 2 and any(word in text for word in ["together", "altogether", "in all", "total", "combined"]):
+        first = items[0]
+        second = items[1]
+        a = first["count"]
+        b = second["count"]
+        emo_a = choose_emoji(first["object"], first.get("color", ""))
+        emo_b = choose_emoji(second["object"], second.get("color", ""))
+        return f"""
+        <div class='smalltext'><b>Group 1</b></div>
+        <div class='emojiwrap'>{emoji_grid(emo_a, a, cols=10)}</div>
+        <div class='eqline'>+</div>
+        <div class='smalltext'><b>Group 2</b></div>
+        <div class='emojiwrap'>{emoji_grid(emo_b, b, cols=10)}</div>
+        <div class='eqline'>=</div>
+        {block(f'{final_num} total {obj}(s)', final_num)}
+        """
 
-    if any(w in text for w in ["each", "every", "times", "twice", "double", "triple"]):
-        nums = [word_to_num(x) for x in re.findall(r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\b", text)]
-        nums = [x for x in nums if x is not None]
-        if len(nums) >= 2:
-            a, b = nums[0], nums[1]
-            obj = answer_obj or (items[0]["object"] if items else "item")
-            color = items[0].get("color","") if items else ""
-            return f'''
-            {block(obj, color, a, f'{a} group(s)')}
-            <div class="eqline">×</div>
-            {block(obj, color, b, f'{b} each')}
-            <div class="eqline">=</div>
-            {block(obj, color, final_num, f'{final_num} {obj}(s)')}
-            '''
-
-    if any(w in text for w in ["split", "share equally", "equally", "divide", "among", "per"]):
-        nums = [word_to_num(x) for x in re.findall(r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\b", text)]
-        nums = [x for x in nums if x is not None]
-        if len(nums) >= 2:
-            a, b = nums[0], nums[1]
-            obj = answer_obj or (items[0]["object"] if items else "item")
-            color = items[0].get("color","") if items else ""
-            return f'''
-            {block(obj, color, a, f'{a} {obj}(s)')}
-            <div class="eqline">÷</div>
-            <div class='smalltext'><b>{b} groups</b></div>
-            <div class="eqline">=</div>
-            {block(obj, color, final_num, f'{final_num} {obj}(s)')}
-            '''
+    if len(nums) >= 2:
+        a, b = nums[0], nums[1]
+        if any(word in text for word in ["left", "remain", "after", "gave away", "lost", "spent", "used", "less", "fewer"]):
+            top, sub = max(a, b), min(a, b)
+            return f"{block(f'{top} {obj}(s)', top)}<div class='eqline'>−</div>{block(f'{sub} {obj}(s)', sub)}<div class='eqline'>=</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if any(word in text for word in ["each", "every", "times", "double", "triple"]):
+            return f"<div class='smalltext'><b>{a} groups of {b}</b></div><div class='eqline'>{a} × {b} = {final_num}</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if any(word in text for word in ["share equally", "equally", "split", "divide", "among"]):
+            return f"{block(f'{a} {obj}(s)', a)}<div class='eqline'>÷</div><div class='smalltext'><b>{b} groups</b></div><div class='eqline'>=</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if a + b == final_num:
+            return f"{block(f'{a} {obj}(s)', a)}<div class='eqline'>+</div>{block(f'{b} {obj}(s)', b)}<div class='eqline'>=</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if max(a, b) - min(a, b) == final_num:
+            top, sub = max(a, b), min(a, b)
+            return f"{block(f'{top} {obj}(s)', top)}<div class='eqline'>−</div>{block(f'{sub} {obj}(s)', sub)}<div class='eqline'>=</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if a * b == final_num:
+            return f"<div class='eqline'>{a} × {b} = {final_num}</div>{block(f'{final_num} {obj}(s)', final_num)}"
+        if b != 0 and a // b == final_num and a % b == 0:
+            return f"<div class='eqline'>{a} ÷ {b} = {final_num}</div>{block(f'{final_num} {obj}(s)', final_num)}"
 
     return "<div class='smalltext'>Could not detect the full emoji operation automatically for this problem.</div>"
 
-def get_bundle(problem: str, dataset_answer: str):
-    k = md5("bundle::" + problem + "::" + dataset_answer)
-    p = CACHE_DIR / f"{k}_bundle.json"
-    txt = read_text(p)
-    if txt is None:
-        txt = call_text(prompt_all_text(problem, dataset_answer))
-        write_text(p, txt)
-    return extract_json_object(txt)
 
-def get_story_image(problem: str):
+# =========================
+# Caching bundles
+# =========================
+def get_bundle(problem: str, dataset_answer: str) -> dict:
+    key = md5("bundle::" + problem + "::" + dataset_answer)
+    path = CACHE_DIR / f"{key}_bundle.json"
+    cached = read_text(path)
+    if cached is None:
+        cached = call_text(prompt_all_text(problem, dataset_answer))
+        write_text(path, cached)
+    return extract_json_object(cached)
+
+
+def get_story_image(problem: str) -> str:
     return images_generate_b64(prompt_story_image(problem), size="1024x1024")
 
-st.sidebar.markdown("## 🎛️ Controls")
-mode = st.sidebar.radio("Choose experience", ["Adapter only", "Adapter + emojis + illustration"], index=0)
-uploaded_xml = st.sidebar.file_uploader("Upload ASDiv.xml", type=["xml"])
-query = st.sidebar.text_input("Search by word", placeholder="apple, peach, ticket...")
-only_with_color = st.sidebar.checkbox("Show problems with color words", value=False)
-shuffle_btn = st.sidebar.button("🎲 Surprise me")
-st.sidebar.info("Adapter only is fastest. Illustration mode adds the image and emoji visuals.")
 
-client_ok = get_client() is not None
-if client_ok:
-    st.sidebar.success("OpenAI key detected")
-else:
-    st.sidebar.warning("No OpenAI key detected")
-default_xml_path = APP_DIR / "ASDiv.xml"
-xml_bytes = None
-if uploaded_xml is not None:
-    xml_bytes = uploaded_xml.read()
-elif default_xml_path.exists():
-    xml_bytes = default_xml_path.read_bytes()
+def export_bundle_json(dataset_name: str, row: pd.Series, bundle: dict) -> str:
+    payload = {
+        "dataset_name": dataset_name,
+        "problem_id": row.get("problem_id", ""),
+        "grade": row.get("grade", ""),
+        "category": row.get("category", ""),
+        "problem_text_full": row["problem_text_full"],
+        "reference_answer": row["reference_answer"],
+        **bundle,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
-if xml_bytes is None:
-    st.markdown("<div class='hero'><h1>🌈 Math Problem Adapter</h1><p>Upload <b>ASDiv.xml</b> in the sidebar to begin.</p></div>", unsafe_allow_html=True)
-    st.stop()
 
-asdiv_full = parse_asdiv_full(xml_bytes)
-df = asdiv_full.copy()
+# =========================
+# Dataset registry
+# =========================
+def load_uploaded_datasets(files) -> Dict[str, pd.DataFrame]:
+    datasets: Dict[str, pd.DataFrame] = {}
+    for f in files or []:
+        ext = Path(f.name).suffix.lower()
+        dataset_name = Path(f.name).stem
+        file_bytes = f.read()
+        if ext == ".xml":
+            datasets[dataset_name] = parse_asdiv_full(file_bytes)
+        elif ext == ".json":
+            datasets[dataset_name] = parse_json_dataset(file_bytes, dataset_name, f.name)
+    return datasets
 
-if query.strip():
-    q = query.strip().lower()
-    df = df[df["problem_text_full"].str.lower().str.contains(q, na=False)]
-if only_with_color:
-    df = df[df["problem_text_full"].str.lower().str.contains(r"\b(red|green|blue|yellow|orange|purple|pink|brown|black|white)\b", regex=True, na=False)]
 
-if len(df) == 0:
-    st.error("No problems matched your filters.")
-    st.stop()
-
-if shuffle_btn:
-    st.session_state["picked_index"] = random.randint(0, len(df)-1)
-
-if "picked_index" not in st.session_state or st.session_state["picked_index"] >= len(df):
-    st.session_state["picked_index"] = 0
-
-st.markdown("""
-<div class="hero">
-  <h1>🌈 Math Problem Adapter (Grades 1–2)</h1>
-  <p>Beautiful conference-ready demo for accessibility-focused math adaptation. Pick a problem, generate learner-friendly rewrites, and show emoji math visuals with optional illustration.</p>
-</div>
-""", unsafe_allow_html=True)
-
-problem_labels = [f"{i} — {re.sub(r'\s+', ' ', str(t)).strip()}" for i, t in enumerate(df["problem_text_full"].tolist())]
-selected_label = st.selectbox("📘 Pick a problem", problem_labels, index=st.session_state["picked_index"])
-selected_idx = int(selected_label.split(" — ")[0])
-st.session_state["picked_index"] = selected_idx
-
-row = df.iloc[selected_idx]
-problem = row["problem_text_full"]
-dataset_answer = row["reference_answer"]
-
-generate = st.button("✨ Generate Conference View", type="primary", use_container_width=True)
-
-def card_start(badge_class: str, title: str):
+# =========================
+# Sidebar + top area
+# =========================
+def card_start(badge_class: str, title: str) -> str:
     return f"<div class='card'><div class='badge {badge_class}'>{title}</div>"
 
-def card_end():
+
+def card_end() -> str:
     return "</div>"
 
-def image_html_from_b64(b64: str):
-    return f"<img src='data:image/png;base64,{b64}' style='width:100%;'/>"
 
-def render_full(bundle=None, story_img_html="", exact_html="", operation_html=""):
-    st.markdown(card_start("badge-orig", "📖 Original Problem (Full)") + f"<div class='bigtext'>{problem}</div>" + f"<div class='smalltext'><b>Correct answer (dataset):</b> {dataset_answer}</div>" + card_end(), unsafe_allow_html=True)
-
-    if mode == "Adapter + emojis + illustration":
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(card_start("badge-img", "🖼️ Story Illustration") + story_img_html + card_end(), unsafe_allow_html=True)
-        with c2:
-            st.markdown(card_start("badge-exact", "🎯 Exact Count Visual") + exact_html + card_end(), unsafe_allow_html=True)
-
-        st.markdown(card_start("badge-op", "🧮 Emoji Math Operation") + operation_html + card_end(), unsafe_allow_html=True)
-
-    if bundle:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown(card_start("badge-adhd", "⚡ ADHD Version") + f"<div class='bigtext'>{bundle.get('ADHD_problem','')}</div>" + card_end(), unsafe_allow_html=True)
-        with c2:
-            st.markdown(card_start("badge-ell", "🟢 ELL Version") + f"<div class='bigtext'>{bundle.get('ELL_problem','')}</div>" + card_end(), unsafe_allow_html=True)
-        with c3:
-            st.markdown(card_start("badge-id", "🧠 ID Version") + f"<div class='bigtext'>{bundle.get('ID_problem','')}</div>" + card_end(), unsafe_allow_html=True)
-
-        st.markdown(card_start("badge-sol", "👩‍🏫 Teacher Solution") + f"<div class='bigtext'>{bundle.get('teacher_solution','')}</div>" + card_end(), unsafe_allow_html=True)
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown(card_start("badge-sol", "⚡ ADHD Explanation") + f"<div class='bigtext'>{bundle.get('ADHD_expl','')}</div>" + card_end(), unsafe_allow_html=True)
-        with c2:
-            st.markdown(card_start("badge-sol", "🟢 ELL Explanation") + f"<div class='bigtext'>{bundle.get('ELL_expl','')}</div>" + card_end(), unsafe_allow_html=True)
-        with c3:
-            st.markdown(card_start("badge-sol", "🧠 ID Explanation") + f"<div class='bigtext'>{bundle.get('ID_expl','')}</div>" + card_end(), unsafe_allow_html=True)
-
-if not generate:
-    preview_plan = extract_local_count_plan(problem)
-    preview_exact = build_exact_visual(preview_plan) if mode == "Adapter + emojis + illustration" else ""
-    preview_op = build_operation_visual(problem, dataset_answer, preview_plan) if mode == "Adapter + emojis + illustration" else ""
-    render_full(bundle=None, story_img_html="<div class='smalltext'>Click Generate to create the illustration.</div>", exact_html=preview_exact, operation_html=preview_op)
-    st.stop()
-
-try:
-    with st.spinner("Generating learner-friendly output..."):
-        bundle = get_bundle(problem, dataset_answer)
-
-    story_img_html = ""
-    exact_html = ""
-    operation_html = ""
-
-    if mode == "Adapter + emojis + illustration":
-        plan = extract_local_count_plan(problem)
-        exact_html = build_exact_visual(plan)
-        operation_html = build_operation_visual(problem, dataset_answer, plan)
-
-        with st.spinner("Generating story illustration..."):
-            try:
-                b64 = get_story_image(problem)
-                story_img_html = image_html_from_b64(b64)
-            except Exception as e:
-                story_img_html = f"<div class='smalltext'>Image generation failed: {e}</div>"
-
-    render_full(bundle=bundle, story_img_html=story_img_html, exact_html=exact_html, operation_html=operation_html)
-
-except Exception as e:
-    st.error(f"Error: {e}")
+def render_output(problem: str, dataset_answer: str, row: pd.Series, bundle: Optional[dict], story_img_html: str, exact_html: str, operation_html: str,
